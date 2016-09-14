@@ -455,7 +455,6 @@
 						body { overflow: auto !important; }
 					</style>
 					<script type="text/javascript" src="/web/static/test/testing.js" />
-
 					<script type="text/javascript" src="/web/static/test/registry.js" />
 					<script type="text/javascript" src="/web/static/test/rpc-misordered.js" />
 					<script type="text/javascript" src="/web/static/test/mutex.js" />
