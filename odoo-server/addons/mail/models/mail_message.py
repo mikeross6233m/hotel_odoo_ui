@@ -57,12 +57,12 @@ class Message(models.Model):
         help='Attachments are linked to a document through model / res_id and to the message'
              'through this field.')
     parent_id = fields.Many2one(
-        'mail.message', 'Parent Message', select=True, ondelete='set null',
+        'mail.message', 'Parent Message', index=True, ondelete='set null',
         help="Initial thread message.")
     child_ids = fields.One2many('mail.message', 'parent_id', 'Child Messages')
     # related document
-    model = fields.Char('Related Document Model', select=1)
-    res_id = fields.Integer('Related Document ID', select=1)
+    model = fields.Char('Related Document Model', index=True)
+    res_id = fields.Integer('Related Document ID', index=True)
     record_name = fields.Char('Message Record Name', help="Name get of the related document.")
     # characteristics
     message_type = fields.Selection([
@@ -73,13 +73,13 @@ class Message(models.Model):
         help="Message type: email for email message, notification for system "
              "message, comment for other messages such as user replies",
         oldname='type')
-    subtype_id = fields.Many2one('mail.message.subtype', 'Subtype', ondelete='set null', select=1)
+    subtype_id = fields.Many2one('mail.message.subtype', 'Subtype', ondelete='set null', index=True)
     # origin
     email_from = fields.Char(
         'From', default=_get_default_from,
         help="Email address of the sender. This field is set when no matching partner is found and replaces the author_id field in the chatter.")
     author_id = fields.Many2one(
-        'res.partner', 'Author', select=1,
+        'res.partner', 'Author', index=True,
         ondelete='set null', default=_get_default_author,
         help="Author of the message. If not set, email_from may hold an email address that did not match any partner.")
     author_avatar = fields.Binary("Author's avatar", related='author_id.image_small')
@@ -108,7 +108,7 @@ class Message(models.Model):
     no_auto_thread = fields.Boolean(
         'No threading for answers',
         help='Answers do not go in the original document discussion thread. This has an impact on the generated message-id.')
-    message_id = fields.Char('Message-Id', help='Message unique identifier', select=1, readonly=1, copy=False)
+    message_id = fields.Char('Message-Id', help='Message unique identifier', index=True, readonly=1, copy=False)
     reply_to = fields.Char('Reply-To', help='Reply email address. Setting the reply_to bypasses the automatic thread creation.')
     mail_server_id = fields.Many2one('ir.mail_server', 'Outgoing mail server')
 
@@ -299,6 +299,7 @@ class Message(models.Model):
             'changed_field': tracking.field_desc,
             'old_value': tracking.get_old_display_value()[0],
             'new_value': tracking.get_new_display_value()[0],
+            'field_type': tracking.field_type,
         }) for tracking in trackings)
 
         # 4. Update message dictionaries
@@ -741,7 +742,13 @@ class Message(models.Model):
                 ON channel_partner.channel_id = channel.id AND channel_partner.partner_id = (%%s)
                 WHERE m.id = ANY (%%s)""" % self._table, (self.env.user.partner_id.id, self.env.user.partner_id.id, self.ids,))
             for mid, rmod, rid, author_id, parent_id, partner_id, channel_id in self._cr.fetchall():
-                message_values[mid] = {'model': rmod, 'res_id': rid, 'author_id': author_id, 'parent_id': parent_id, 'partner_id': partner_id, 'channel_id': channel_id}
+                message_values[mid] = {
+                    'model': rmod,
+                    'res_id': rid,
+                    'author_id': author_id,
+                    'parent_id': parent_id,
+                    'notified': any((message_values[mid].get('notified'), partner_id, channel_id))
+                }
         else:
             self._cr.execute("""SELECT DISTINCT id, model, res_id, author_id, parent_id FROM "%s" WHERE id = ANY (%%s)""" % self._table, (self.ids,))
             for mid, rmod, rid, author_id, parent_id in self._cr.fetchall():
@@ -780,7 +787,7 @@ class Message(models.Model):
         other_ids = set(self.ids).difference(set(author_ids), set(notified_ids))
         model_record_ids = _generate_model_record_ids(message_values, other_ids)
         if operation in ['read', 'write']:
-            notified_ids = [mid for mid, message in message_values.iteritems() if message.get('partner_id') or message.get('channel_id')]
+            notified_ids = [mid for mid, message in message_values.iteritems() if message.get('notified')]
         elif operation == 'create':
             for doc_model, doc_ids in model_record_ids.items():
                 followers = self.env['mail.followers'].sudo().search([

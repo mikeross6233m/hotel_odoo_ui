@@ -12,7 +12,7 @@ var web_client = require('web.web_client');
 
 var _t = core._t;
 var _lt = core._lt;
-var LIMIT = 100;
+var LIMIT = 25;
 var preview_msg_max_size = 350;  // optimal for native english speakers
 
 var MessageModel = new Model('mail.message', session.context);
@@ -84,7 +84,7 @@ function notify_incoming_message (msg, options) {
         web_client.set_title_part("_chat", tab_title);
     }
 
-    if (Notification && Notification.permission === "granted") {
+    if (window.Notification && Notification.permission === "granted") {
         if (bus.is_master) {
             send_native_notification(title, content);
         }
@@ -282,6 +282,22 @@ function make_message (data) {
         a.url = '/web/content/' + a.id + '?download=true';
     });
 
+    // format date to the local only once by message
+    // can not be done in preprocess, since it alter the original value
+    if (msg.tracking_value_ids && msg.tracking_value_ids.length) {
+        _.each(msg.tracking_value_ids, function(f) {
+            if (_.contains(['date', 'datetime'], f.field_type)) {
+                var format = (f.field_type === 'date') ? 'LL' : 'LLL';
+                if (f.old_value) {
+                    f.old_value = moment.utc(f.old_value).local().format(format);
+                }
+                if (f.new_value) {
+                    f.new_value = moment.utc(f.new_value).local().format(format);
+                }
+            }
+        });
+    }
+
     return msg;
 }
 
@@ -336,10 +352,8 @@ function make_channel (data, options) {
             messages: [],
         }},
     };
-    if (channel.type === "channel" && data.public !== "private") {
-        channel.type = "public";
-    } else if (data.public === "private") {
-        channel.type = "private";
+    if (channel.type === "channel") {
+        channel.type = data.public !== "private" ? "public" : "private";
     }
     if (_.size(data.direct_partner) > 0) {
         channel.type = "dm";
@@ -461,7 +475,7 @@ function fetch_document_messages (ids, options) {
                 processed_msgs.push(add_message(msg, {silent: true}));
             });
             return _.sortBy(loaded_msgs.concat(processed_msgs), function (msg) {
-                return msg.date;
+                return msg.id;
             });
         });
     } else {
